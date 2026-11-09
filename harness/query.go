@@ -50,6 +50,13 @@ type QueryInput struct {
 	// per-tool output budget (head size; 0 = default 30000). See tool.Capture.
 	ToolOutputDir      string
 	MaxToolOutputChars int
+	// UntrustedOutputBoundary, when set, frames every text tool result as
+	// untrusted data between nonce-tagged markers, holds back a fixed reserve
+	// from the output cap for the framing, and appends one fixed note to System
+	// (once: skipped if System already carries it) telling the model that framed
+	// blocks are data, never instructions, and end only at the END marker with
+	// the same nonce. Off by default. Compaction summaries are not framed.
+	UntrustedOutputBoundary bool
 
 	// Tasks, when non-nil, is the background-task manager shared with the tools.
 	// The loop drains its completion notifications into the conversation between
@@ -202,6 +209,9 @@ func (d *QueryDeps) withDefaults(in QueryInput) {
 // always KindResult carrying a Terminal (unless the consumer stops early).
 func Query(ctx context.Context, in QueryInput, deps QueryDeps) iter.Seq2[Event, error] {
 	deps.withDefaults(in)
+	if in.UntrustedOutputBoundary {
+		in.System = withUntrustedNote(in.System)
+	}
 	conc := in.MaxConcurrency
 	if conc <= 0 {
 		conc = 10

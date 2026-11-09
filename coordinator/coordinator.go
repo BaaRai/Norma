@@ -41,6 +41,12 @@ type Config struct {
 	MaxParallel    int // bounded concurrency for RunParallel (default 4)
 	CanUseTool     permission.CanUseTool
 	Hooks          harness.HookRunner
+	// ToolOutputDir, MaxToolOutputChars and UntrustedOutputBoundary are passed
+	// to every worker unchanged (see subagent.Config), so worker tool output is
+	// spilled, capped and framed the same way as the coordinator's.
+	ToolOutputDir           string
+	MaxToolOutputChars      int
+	UntrustedOutputBoundary bool
 }
 
 func (c *Config) workerPrompt() []string {
@@ -65,6 +71,10 @@ func (c *Config) subagentConfig() subagent.Config {
 		MaxDepth:    c.MaxDepth,
 		CanUseTool:  c.CanUseTool,
 		Hooks:       c.Hooks,
+
+		ToolOutputDir:           c.ToolOutputDir,
+		MaxToolOutputChars:      c.MaxToolOutputChars,
+		UntrustedOutputBoundary: c.UntrustedOutputBoundary,
 		Agents: map[string]subagent.Definition{
 			"worker": {
 				Description:    "Executes a research, implementation, or verification task autonomously and reports back.",

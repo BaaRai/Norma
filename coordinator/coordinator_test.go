@@ -90,3 +90,24 @@ func TestAgentToolAndSystemSegment(t *testing.T) {
 		t.Fatalf("worker dispatch: %q", res.Flatten())
 	}
 }
+
+// TestSubagentConfigForwardsToolOutputOptions checks that the spill dir, output
+// cap and untrusted-output boundary reach the workers' subagent.Config, and stay
+// zero when the coordinator leaves them unset.
+func TestSubagentConfigForwardsToolOutputOptions(t *testing.T) {
+	on := (&Config{
+		ToolOutputDir:           "/tmp/spill",
+		MaxToolOutputChars:      1234,
+		UntrustedOutputBoundary: true,
+	}).subagentConfig()
+	if !on.UntrustedOutputBoundary || on.ToolOutputDir != "/tmp/spill" || on.MaxToolOutputChars != 1234 {
+		t.Fatalf("options not forwarded: dir=%q max=%d boundary=%v",
+			on.ToolOutputDir, on.MaxToolOutputChars, on.UntrustedOutputBoundary)
+	}
+
+	off := (&Config{}).subagentConfig()
+	if off.UntrustedOutputBoundary || off.ToolOutputDir != "" || off.MaxToolOutputChars != 0 {
+		t.Fatalf("option off: want zero values, got dir=%q max=%d boundary=%v",
+			off.ToolOutputDir, off.MaxToolOutputChars, off.UntrustedOutputBoundary)
+	}
+}
