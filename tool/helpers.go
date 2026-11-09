@@ -21,6 +21,11 @@ func maxOut(tc *ToolContext) int {
 
 var spillSeq atomic.Int64
 
+// captureNoticeSlack bounds the notice Capture appends after its head (spill
+// pointer with an absolute path, or truncation note). Used to tell a genuine
+// bounded result from a longer output that only contains a marker string.
+const captureNoticeSlack = 4096
+
 // Capture bounds a tool's textual output for the model. When the output exceeds
 // the limit (ToolContext.MaxOutputChars, default 30000) and the host configured
 // an OutputDir, the FULL output is written to a file there and a tight head + a
@@ -70,7 +75,9 @@ func alreadyCaptured(s string) bool {
 // already handled themselves. Output within the limit is a no-op either way,
 // since Capture returns it unchanged.
 func CaptureOnce(tc *ToolContext, s string) string {
-	if alreadyCaptured(s) {
+	// A genuine Capture result is bounded (max + a short notice). A longer output
+	// that merely contains a marker string is raw tool output and must be capped.
+	if alreadyCaptured(s) && len(s) <= maxOut(tc)+captureNoticeSlack {
 		return s
 	}
 	return Capture(tc, s)
@@ -90,12 +97,13 @@ func spillOutput(dir, s string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	// Spilled output can hold secrets (env dumps, tokens in logs): owner-only.
+	if err := os.MkdirAll(abs, 0o700); err != nil {
 		return "", err
 	}
 	name := fmt.Sprintf("output-%d-%d.txt", time.Now().Unix(), spillSeq.Add(1))
 	path := filepath.Join(abs, name)
-	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(s), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
