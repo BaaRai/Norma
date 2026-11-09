@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -251,10 +252,10 @@ func TestUntrustedBoundarySystemNote(t *testing.T) {
 // tool_result stays within the cap; with the option off the head budget is the
 // full cap, as before.
 func TestUntrustedBoundaryCapHoldsBackOverhead(t *testing.T) {
-	if got := boundaryCap(30000); got != 30000-boundaryOverhead {
+	if got := boundaryCap(30000, boundaryReserve("")); got != 30000-boundaryOverhead {
 		t.Fatalf("boundaryCap(30000) = %d", got)
 	}
-	if got := boundaryCap(100); got != 50 {
+	if got := boundaryCap(100, boundaryReserve("")); got != 50 {
 		t.Fatalf("boundaryCap(100) = %d, want 50", got)
 	}
 	inputs := map[string]string{
@@ -342,6 +343,51 @@ func TestUntrustedBoundaryWorstCaseWithinCap(t *testing.T) {
 	if len(got) > max {
 		t.Fatalf("framed tool_result is %d bytes, over the configured max %d", len(got), max)
 	}
+}
+
+// TestUntrustedBoundaryWorstCaseWithSpill: the same 30000-byte block with 1000
+// markers, but with a ToolOutputDir, so Capture spills and appends a notice
+// carrying an absolute path. The framed tool_result, notice included, stays
+// within the configured max, also for a long output dir. With the option off
+// no reserve is applied: the block fits the cap and comes back unchanged.
+func TestUntrustedBoundaryWorstCaseWithSpill(t *testing.T) {
+	const max = 30000
+	markers := strings.Repeat("<<<UNTRUSTED_OUTPUT", 500) + strings.Repeat("<<<END_UNTRUSTED_OUTPUT", 500)
+	in := markers + strings.Repeat("a", max-len(markers))
+	run := func(dir string, boundary bool) string {
+		msgs := runOneTool(t, func() tool.Result { return tool.Text(in) }, QueryInput{
+			MaxToolOutputChars:      max,
+			ToolOutputDir:           dir,
+			UntrustedOutputBoundary: boundary,
+		})
+		return msgs[2].Content[0].Content[0].Text
+	}
+	longDir := t.TempDir()
+	for len(longDir) < 200 {
+		longDir = filepath.Join(longDir, "nested-spill-dir")
+	}
+	dirs := map[string]string{"tempdir": t.TempDir(), "long path": longDir}
+	for _, name := range []string{"tempdir", "long path"} {
+		t.Run(name, func(t *testing.T) {
+			dir := dirs[name]
+			got := run(dir, true)
+			t.Logf("%s: dir=%d bytes input=%d final=%d max=%d", name, len(dir), len(in), len(got), max)
+			if !strings.HasPrefix(got, testOpenPrefix) {
+				t.Fatalf("tool_result not framed")
+			}
+			if !strings.Contains(got, "<persisted-output>") {
+				t.Fatalf("output did not spill: %q", got[len(got)-200:])
+			}
+			if len(got) > max {
+				t.Fatalf("framed tool_result is %d bytes, over the configured max %d", len(got), max)
+			}
+		})
+	}
+	t.Run("option off", func(t *testing.T) {
+		if got := run(t.TempDir(), false); got != in {
+			t.Fatalf("option off changed the tool_result: len=%d want %d", len(got), len(in))
+		}
+	})
 }
 
 // TestUntrustedBoundaryExtraNotFramed: Result.Extra is the host's privileged

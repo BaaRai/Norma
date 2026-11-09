@@ -95,7 +95,7 @@ func (l *loop) execOne(use llm.ContentBlock, emitProgress func(tool.ProgressInfo
 	// Framing adds bytes after the cap; hold them back from the head budget
 	// (tools that Capture themselves see the same reduced cap).
 	if l.in.UntrustedOutputBoundary {
-		tc.MaxOutputChars = boundaryCap(tool.MaxOutput(tc))
+		tc.MaxOutputChars = boundaryCap(tool.MaxOutput(tc), boundaryReserve(l.in.ToolOutputDir))
 	}
 	// toolCtx carries the run's MaxDuration deadline, so a tool that overruns the
 	// wall-clock budget is interrupted here (the turn loop then enters wrap-up). During

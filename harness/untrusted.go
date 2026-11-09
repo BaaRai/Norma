@@ -3,6 +3,7 @@ package harness
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,12 +54,26 @@ func withUntrustedNote(system []string) []string {
 // the output carries.
 const boundaryOverhead = 256
 
-// boundaryCap is the output cap to use when the boundary is on: max less
-// boundaryOverhead, but never less than half of max, so a small configured cap
-// stays usable (and never reaches 0, which would mean "default").
-func boundaryCap(max int) int {
-	return max - min(boundaryOverhead, max/2)
+// spillNoticeOverhead covers the fixed spill-notice text, the two decimal numbers and the file name output-<unix>-<seq>.txt.
+const spillNoticeOverhead = 192
+
+// boundaryReserve returns the head budget to hold back when the boundary is on. With an output dir, Capture appends a spill notice carrying an absolute path, so the reserve grows with that path.
+func boundaryReserve(dir string) int {
+	reserve := boundaryOverhead
+	if dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			reserve += spillNoticeOverhead + len(abs)
+		} else {
+			reserve += spillNoticeOverhead + len(dir) + 256
+		}
+	}
+	return reserve
 }
+
+// boundaryCap is the output cap to use when the boundary is on: max less
+// reserve, but never less than half of max, so a small configured cap
+// stays usable (and never reaches 0, which would mean "default").
+func boundaryCap(max, reserve int) int { return max - min(reserve, max/2) }
 
 // newBoundaryNonce returns 16 hex characters from crypto/rand.
 func newBoundaryNonce() (string, error) {
