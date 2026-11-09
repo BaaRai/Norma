@@ -14,7 +14,7 @@ func TestCapOutputCapsOversizedTextBlock(t *testing.T) {
 	long := strings.Repeat("z", 5000)
 	res := tool.Result{Content: []llm.ContentBlock{llm.TextBlock(long)}}
 
-	out := capOutput(tc, res)
+	out := capOutput(tc, res, false)
 	got := out.Content[0].Text
 	if len(got) >= 5000 || !strings.Contains(got, "characters truncated]") {
 		t.Fatalf("capOutput did not cap oversized block: len=%d", len(got))
@@ -26,7 +26,7 @@ func TestCapOutputLeavesSmallOutputIntact(t *testing.T) {
 	tc := &tool.ToolContext{MaxOutputChars: 100}
 	res := tool.Result{Content: []llm.ContentBlock{llm.TextBlock("fine")}}
 
-	if out := capOutput(tc, res); out.Content[0].Text != "fine" {
+	if out := capOutput(tc, res, false); out.Content[0].Text != "fine" {
 		t.Fatalf("small output changed: %q", out.Content[0].Text)
 	}
 }
@@ -38,7 +38,7 @@ func TestCapOutputIdempotentOnAlreadyCaptured(t *testing.T) {
 	pre := strings.Repeat("a", 100) + "\n\n... <persisted-output>[Output too large: full 9999 bytes ... saved to x.txt </persisted-output>"
 	res := tool.Result{Content: []llm.ContentBlock{llm.TextBlock(pre)}}
 
-	if out := capOutput(tc, res); out.Content[0].Text != pre {
+	if out := capOutput(tc, res, false); out.Content[0].Text != pre {
 		t.Fatalf("capOutput re-processed already-captured output")
 	}
 }

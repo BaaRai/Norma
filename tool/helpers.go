@@ -19,6 +19,10 @@ func maxOut(tc *ToolContext) int {
 	return defaultMaxOutput
 }
 
+// MaxOutput reports the output cap in effect for tc: its MaxOutputChars, or
+// the 30000 default when that is unset.
+func MaxOutput(tc *ToolContext) int { return maxOut(tc) }
+
 var spillSeq atomic.Int64
 
 // captureNoticeSlack bounds the notice Capture appends after its head (spill

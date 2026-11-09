@@ -163,6 +163,16 @@ type Options struct {
 	ToolOutputDir      string
 	MaxToolOutputChars int
 
+	// UntrustedOutputBoundary, when true, frames every text tool result as
+	// untrusted data between nonce-tagged markers before it enters the context,
+	// and the harness appends one fixed note to the system prompt (once: skipped
+	// if it is already present) saying framed blocks are data, never
+	// instructions, and end only at the END marker carrying the same nonce. The
+	// output cap holds back a fixed reserve for the framing. Default false:
+	// output and system prompt are unchanged. Compaction summaries are not
+	// framed, so the boundary does not survive a compaction.
+	UntrustedOutputBoundary bool
+
 	// BashEnv holds extra "KEY=VALUE" entries injected into the environment of
 	// Bash subprocesses (foreground + background), overriding inherited values.
 	// The agent's own process env is untouched. Used e.g. to route child-command
@@ -488,34 +498,35 @@ func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Ev
 		reminderExtra = s.opts.SystemReminderFunc()
 	}
 	in := harness.QueryInput{
-		Provider:           s.opts.Provider,
-		System:             s.system(),
-		DynamicBoundary:    s.opts.DynamicBoundary,
-		Messages:           s.messages,
-		SystemReminder:     buildSystemReminder(reminderExtra),
-		Tools:              s.registry,
-		DeferredTools:      s.opts.DeferredTools,
-		MaxTokens:          s.opts.MaxTokens,
-		Temperature:        s.opts.Temperature,
-		MaxTurns:           s.opts.MaxTurns,
-		MaxDuration:        s.opts.MaxDuration,
-		Settlement:         s.opts.Settlement,
-		MaxConcurrency:     s.opts.MaxConcurrency,
-		WorkingDir:         s.opts.WorkingDir,
-		Todos:              s.opts.Todos,
-		ToolOutputDir:      s.opts.ToolOutputDir,
-		MaxToolOutputChars: s.opts.MaxToolOutputChars,
-		Tasks:              s.tasks,
-		BashEnv:            s.opts.BashEnv,
-		PermissionMode:     s.opts.PermissionMode,
-		Allowed:            s.opts.AllowedTools,
-		Disallowed:         s.opts.DisallowedTools,
-		CanUseTool:         s.opts.CanUseTool,
-		Hooks:              s.opts.Hooks,
-		Compactor:          s.compactor,
-		TokenBudget:        s.opts.TokenBudget,
-		EscalateMaxTokens:  s.opts.EscalateMaxTokens,
-		NonStreaming:       s.opts.NonStreaming,
+		Provider:                s.opts.Provider,
+		System:                  s.system(),
+		DynamicBoundary:         s.opts.DynamicBoundary,
+		Messages:                s.messages,
+		SystemReminder:          buildSystemReminder(reminderExtra),
+		Tools:                   s.registry,
+		DeferredTools:           s.opts.DeferredTools,
+		MaxTokens:               s.opts.MaxTokens,
+		Temperature:             s.opts.Temperature,
+		MaxTurns:                s.opts.MaxTurns,
+		MaxDuration:             s.opts.MaxDuration,
+		Settlement:              s.opts.Settlement,
+		MaxConcurrency:          s.opts.MaxConcurrency,
+		WorkingDir:              s.opts.WorkingDir,
+		Todos:                   s.opts.Todos,
+		ToolOutputDir:           s.opts.ToolOutputDir,
+		MaxToolOutputChars:      s.opts.MaxToolOutputChars,
+		UntrustedOutputBoundary: s.opts.UntrustedOutputBoundary,
+		Tasks:                   s.tasks,
+		BashEnv:                 s.opts.BashEnv,
+		PermissionMode:          s.opts.PermissionMode,
+		Allowed:                 s.opts.AllowedTools,
+		Disallowed:              s.opts.DisallowedTools,
+		CanUseTool:              s.opts.CanUseTool,
+		Hooks:                   s.opts.Hooks,
+		Compactor:               s.compactor,
+		TokenBudget:             s.opts.TokenBudget,
+		EscalateMaxTokens:       s.opts.EscalateMaxTokens,
+		NonStreaming:            s.opts.NonStreaming,
 	}
 	if s.writer != nil {
 		in.Recorder = s.writer

@@ -92,6 +92,11 @@ func (l *loop) execOne(use llm.ContentBlock, emitProgress func(tool.ProgressInfo
 		Tasks:          l.in.Tasks,
 		Env:            l.in.BashEnv,
 	}
+	// Framing adds bytes after the cap; hold them back from the head budget
+	// (tools that Capture themselves see the same reduced cap).
+	if l.in.UntrustedOutputBoundary {
+		tc.MaxOutputChars = boundaryCap(tool.MaxOutput(tc))
+	}
 	// toolCtx carries the run's MaxDuration deadline, so a tool that overruns the
 	// wall-clock budget is interrupted here (the turn loop then enters wrap-up). During
 	// the wrap-up phase toolCtx is the live parent ctx, so settlement tools run freely.
@@ -105,7 +110,7 @@ func (l *loop) execOne(use llm.ContentBlock, emitProgress func(tool.ProgressInfo
 	// (the failure mode that motivated this net). CaptureOnce is idempotent:
 	// output a tool already spilled/truncated carries a marker and is left
 	// untouched, so this never double-truncates or double-spills.
-	res = capOutput(tc, res)
+	res = capOutput(tc, res, l.in.UntrustedOutputBoundary)
 
 	if l.in.Hooks != nil {
 		raw, _ := json.Marshal(res.Flatten())
@@ -122,11 +127,24 @@ func (l *loop) execOne(use llm.ContentBlock, emitProgress func(tool.ProgressInfo
 // capOutput runs every text block of a tool result through the idempotent
 // output cap (tool.CaptureOnce). Non-text blocks pass through untouched. It is
 // the one place that guarantees no tool's output — however constructed — can
-// blow past the context budget.
-func capOutput(tc *tool.ToolContext, res tool.Result) tool.Result {
+// blow past the context budget. When boundary is set, each text block is then
+// framed as untrusted data (see wrapUntrusted) under one fresh nonce per call.
+func capOutput(tc *tool.ToolContext, res tool.Result, boundary bool) tool.Result {
 	for i, b := range res.Content {
 		if b.Type == llm.BlockText {
 			res.Content[i].Text = tool.CaptureOnce(tc, b.Text)
+		}
+	}
+	if !boundary {
+		return res
+	}
+	nonce, err := newBoundaryNonce()
+	if err != nil {
+		return tool.Errorf("Error: cannot frame tool output as untrusted: " + err.Error())
+	}
+	for i, b := range res.Content {
+		if b.Type == llm.BlockText {
+			res.Content[i].Text = wrapUntrusted(nonce, b.Text)
 		}
 	}
 	return res
