@@ -111,9 +111,9 @@ func TestUntrustedBoundaryFakeCloseMarkerNeutralised(t *testing.T) {
 		if n := strings.Count(wrapped, testClosePrefix); n != 1 {
 			t.Fatalf("literal close prefix appears %d times, want 1: %q", n, wrapped)
 		}
-		neutral := "<<<​END_UNTRUSTED_OUTPUT " + guess + ">>>>"
+		neutral := " <<END_UNTRUSTED_OUTPUT " + guess + ">>>>"
 		if !strings.Contains(bodyOf(t, wrapped), neutral) {
-			t.Fatalf("fake close marker not neutralised with U+200B: %q", wrapped)
+			t.Fatalf("fake close marker not neutralised (first '<' -> space): %q", wrapped)
 		}
 	}
 
@@ -182,9 +182,12 @@ func TestUntrustedBoundaryBudgetOverhead(t *testing.T) {
 		over := after - len(c.in)
 		t.Logf("%-13s markers=%4d before=%d after=%d overhead=%d (%.2f%% of %d)",
 			c.name, c.markers, len(c.in), after, over, 100*float64(over)/size, size)
-		if want := framing + 3*c.markers; over != want {
-			t.Fatalf("%s: overhead %d, want framing %d + 3 bytes x %d markers = %d",
-				c.name, over, framing, c.markers, want)
+		if over != framing {
+			t.Fatalf("%s: overhead %d, want the frame alone (%d), whatever the %d markers",
+				c.name, over, framing, c.markers)
+		}
+		if framing > boundaryOverhead {
+			t.Fatalf("frame is %d bytes, over boundaryOverhead %d", framing, boundaryOverhead)
 		}
 	}
 }
@@ -290,10 +293,81 @@ func TestUntrustedBoundaryCapHoldsBackOverhead(t *testing.T) {
 			if !strings.HasPrefix(got, testOpenPrefix) {
 				t.Fatalf("%s: tool_result not framed", name)
 			}
-			// "dense" is the documented overshoot of the fixed reserve (see boundaryOverhead).
-			if name != "dense" && len(got) > 30000 {
+			if len(got) > 30000 {
 				t.Fatalf("%s: framed tool_result is %d bytes, over the 30000 cap", name, len(got))
 			}
 		}
+	}
+}
+
+// runOneTool runs a single call to a tool returning res through the real loop
+// and returns the final transcript.
+func runOneTool(t *testing.T, res func() tool.Result, in QueryInput) []llm.Message {
+	t.Helper()
+	one := tool.Build(tool.Spec{
+		Name:   "One",
+		Schema: map[string]any{"type": "object"},
+		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+			return permission.Allowed()
+		},
+		Run: func(context.Context, json.RawMessage, *tool.ToolContext) (tool.Result, error) {
+			return res(), nil
+		},
+	})
+	m := &scriptedModel{turns: [][]llm.StreamEvent{toolTurn("c1", "One", `{}`), textTurn("done")}}
+	in.Messages = []llm.Message{llm.UserText("go")}
+	in.Tools = tool.NewRegistry(one)
+	in.PermissionMode = permission.ModeBypass
+	return drain(t, in, QueryDeps{CallModel: m.call}).Messages
+}
+
+// TestUntrustedBoundaryWorstCaseWithinCap: a 30000-byte block carrying 1000
+// marker strings, at a configured cap of 30000, stays within the cap once framed.
+func TestUntrustedBoundaryWorstCaseWithinCap(t *testing.T) {
+	const max = 30000
+	markers := strings.Repeat("<<<UNTRUSTED_OUTPUT", 500) + strings.Repeat("<<<END_UNTRUSTED_OUTPUT", 500)
+	in := markers + strings.Repeat("a", max-len(markers))
+	if len(in) != max {
+		t.Fatalf("input is %d bytes, want %d", len(in), max)
+	}
+	msgs := runOneTool(t, func() tool.Result { return tool.Text(in) }, QueryInput{
+		MaxToolOutputChars:      max,
+		UntrustedOutputBoundary: true,
+	})
+	got := msgs[2].Content[0].Content[0].Text
+	t.Logf("1000 markers: input=%d final=%d max=%d", len(in), len(got), max)
+	if !strings.HasPrefix(got, testOpenPrefix) {
+		t.Fatalf("tool_result not framed")
+	}
+	if len(got) > max {
+		t.Fatalf("framed tool_result is %d bytes, over the configured max %d", len(got), max)
+	}
+}
+
+// TestUntrustedBoundaryExtraNotFramed: Result.Extra is the host's privileged
+// channel (e.g. Skill instructions) and passes through unframed, while the
+// same result's Content is framed.
+func TestUntrustedBoundaryExtraNotFramed(t *testing.T) {
+	const content = "raw tool output"
+	const extra = "Follow these skill instructions."
+	msgs := runOneTool(t, func() tool.Result {
+		return tool.Result{
+			Content: []llm.ContentBlock{llm.TextBlock(content)},
+			Extra:   []llm.Message{llm.UserText(extra)},
+		}
+	}, QueryInput{UntrustedOutputBoundary: true})
+
+	res := msgs[2].Content[0].Content[0].Text
+	if !strings.HasPrefix(res, testOpenPrefix) || bodyOf(t, res) != content {
+		t.Fatalf("Content not framed: %q", res)
+	}
+	if len(msgs) < 4 {
+		t.Fatalf("Extra message missing: %d messages", len(msgs))
+	}
+	if got := msgs[3].Text(); got != extra {
+		t.Fatalf("Extra message changed: got %q want %q", got, extra)
+	}
+	if strings.Contains(msgs[3].Text(), "UNTRUSTED_OUTPUT") {
+		t.Fatalf("Extra message framed: %q", msgs[3].Text())
 	}
 }

@@ -64,6 +64,12 @@ type Result struct {
 	// right after its tool_result (e.g. the Skill tool emits the invoked skill's
 	// instructions as an independent user message rather than burying them in the
 	// tool_result). Appended in order; nil for ordinary tools.
+	//
+	// Extra is a privileged channel reserved for the host: it carries
+	// instructions the model must follow, so the untrusted-output boundary does
+	// not frame it (framing it would break skills). It must never carry target
+	// content or raw tool output; that goes in Content, which the boundary
+	// frames.
 	Extra []llm.Message
 }
 
