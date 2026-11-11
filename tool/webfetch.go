@@ -31,6 +31,11 @@ type WebFetchConfig struct {
 	// InsecureTLS skips TLS certificate verification entirely (equivalent to
 	// curl -k). A blunt fallback when no CA cert is available; prefer CACert.
 	InsecureTLS bool
+	// CheckRedirect, when set, is installed as the http.Client CheckRedirect of
+	// both the primary client and the direct (no-proxy) retry client, so it sees
+	// every redirect hop on either path. Returning an error stops the redirect and
+	// fails the fetch with that error. nil keeps net/http's default policy.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 // NewWebFetch builds the WebFetch tool: fetches a URL over HTTP(S) and returns
@@ -70,7 +75,7 @@ const maxFetchBytes = 2 << 20 // 2 MiB
 // newFetchClient returns an HTTP client honoring the proxy / TLS config.
 func newFetchClient(cfg WebFetchConfig) *http.Client {
 	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" {
-		return &http.Client{}
+		return &http.Client{CheckRedirect: cfg.CheckRedirect}
 	}
 	tr := &http.Transport{}
 	if cfg.Proxy != "" {
@@ -94,7 +99,7 @@ func newFetchClient(cfg WebFetchConfig) *http.Client {
 			}
 		}
 	}
-	return &http.Client{Transport: tr}
+	return &http.Client{Transport: tr, CheckRedirect: cfg.CheckRedirect}
 }
 
 // proxyLikelyErr reports whether a fetch error is the kind a recording/MITM proxy
@@ -163,7 +168,7 @@ func webFetchRunner(cfg WebFetchConfig) func(context.Context, json.RawMessage, *
 	// otherwise-reachable URL. nil when no proxy is configured (nothing to bypass).
 	var direct *http.Client
 	if cfg.Proxy != "" {
-		direct = newFetchClient(WebFetchConfig{InsecureTLS: cfg.InsecureTLS})
+		direct = newFetchClient(WebFetchConfig{InsecureTLS: cfg.InsecureTLS, CheckRedirect: cfg.CheckRedirect})
 	}
 	return func(ctx context.Context, input json.RawMessage, _ *ToolContext) (Result, error) {
 		var in struct {
