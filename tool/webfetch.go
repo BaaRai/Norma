@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,15 @@ type WebFetchConfig struct {
 	// every redirect hop on either path. Returning an error stops the redirect and
 	// fails the fetch with that error. nil keeps net/http's default policy.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
+	// DialContext, when set, is installed as the http.Transport DialContext of
+	// both the primary client and the direct (no-proxy) retry client, so every
+	// connection either path opens goes through it. With Proxy set, the primary
+	// client dials the proxy address; the direct retry dials the origin. A dial
+	// error fails the fetch with that error. nil keeps net/http's default dialer.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// DisableDirectRetry, when true, turns off the direct (no-proxy) retry made
+	// after a proxy-caused failure: a fetch that fails through Proxy fails.
+	DisableDirectRetry bool
 }
 
 // NewWebFetch builds the WebFetch tool: fetches a URL over HTTP(S) and returns
@@ -74,10 +84,10 @@ const maxFetchBytes = 2 << 20 // 2 MiB
 
 // newFetchClient returns an HTTP client honoring the proxy / TLS config.
 func newFetchClient(cfg WebFetchConfig) *http.Client {
-	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" {
+	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" && cfg.DialContext == nil {
 		return &http.Client{CheckRedirect: cfg.CheckRedirect}
 	}
-	tr := &http.Transport{}
+	tr := &http.Transport{DialContext: cfg.DialContext}
 	if cfg.Proxy != "" {
 		if pu, err := url.Parse(cfg.Proxy); err == nil {
 			tr.Proxy = http.ProxyURL(pu)
@@ -100,6 +110,16 @@ func newFetchClient(cfg WebFetchConfig) *http.Client {
 		}
 	}
 	return &http.Client{Transport: tr, CheckRedirect: cfg.CheckRedirect}
+}
+
+// newDirectClient returns the direct (no-proxy) retry client, carrying the same
+// TLS skip, CheckRedirect and DialContext as the primary client. It returns nil
+// when no proxy is configured or DisableDirectRetry is set (no retry is made).
+func newDirectClient(cfg WebFetchConfig) *http.Client {
+	if cfg.Proxy == "" || cfg.DisableDirectRetry {
+		return nil
+	}
+	return newFetchClient(WebFetchConfig{InsecureTLS: cfg.InsecureTLS, CheckRedirect: cfg.CheckRedirect, DialContext: cfg.DialContext})
 }
 
 // proxyLikelyErr reports whether a fetch error is the kind a recording/MITM proxy
@@ -165,11 +185,9 @@ func webFetchRunner(cfg WebFetchConfig) func(context.Context, json.RawMessage, *
 	// direct is the no-proxy fallback used when a proxied fetch fails for a
 	// proxy-caused reason (closed tunnel / failed CONNECT / TLS or HTTP2 mismatch):
 	// it bypasses the configured proxy so a recording/MITM hiccup doesn't fail an
-	// otherwise-reachable URL. nil when no proxy is configured (nothing to bypass).
-	var direct *http.Client
-	if cfg.Proxy != "" {
-		direct = newFetchClient(WebFetchConfig{InsecureTLS: cfg.InsecureTLS, CheckRedirect: cfg.CheckRedirect})
-	}
+	// otherwise-reachable URL. nil when no proxy is configured (nothing to bypass)
+	// or when DisableDirectRetry is set.
+	direct := newDirectClient(cfg)
 	return func(ctx context.Context, input json.RawMessage, _ *ToolContext) (Result, error) {
 		var in struct {
 			URL     string `json:"url"`
