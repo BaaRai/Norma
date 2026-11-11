@@ -29,6 +29,9 @@ const (
 	SEToolUseSignature StreamEventType = "tool_use_signature"
 	SEMessageDelta     StreamEventType = "message_delta" // carries stop_reason / usage
 	SEMessageStop      StreamEventType = "message_stop"
+	// SERedactedThinking carries a whole redacted_thinking block; Text is its
+	// opaque data. Emitted only by the Anthropic adapter.
+	SERedactedThinking StreamEventType = "redacted_thinking"
 )
 
 // StreamEvent is one normalized model-level streaming event (FR-03.5).
