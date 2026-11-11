@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // deadProxy is a proxy URL nothing listens on: a fetch through it fails with
@@ -316,5 +317,58 @@ func TestWebFetchDialerErrorFails(t *testing.T) {
 	}
 	if hits.get() != 0 {
 		t.Fatalf("origin hit %d times through a failing dialer", hits.get())
+	}
+}
+
+// With only a dialer set, the transport is a clone of http.DefaultTransport:
+// environment proxy, timeouts and HTTP/2 are kept, the dialer is installed and
+// keep-alive is disabled.
+func TestWebFetchDialerKeepsDefaultTransportSettings(t *testing.T) {
+	d := &dialRecorder{}
+	c := newFetchClient(WebFetchConfig{DialContext: d.dial})
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("want *http.Transport, got %T", c.Transport)
+	}
+	if tr.Proxy == nil {
+		t.Error("Proxy is nil, want ProxyFromEnvironment from http.DefaultTransport")
+	}
+	if !tr.ForceAttemptHTTP2 {
+		t.Error("ForceAttemptHTTP2 is false, want true")
+	}
+	if tr.TLSHandshakeTimeout != 10*time.Second {
+		t.Errorf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout)
+	}
+	if !tr.DisableKeepAlives {
+		t.Error("DisableKeepAlives is false, want true")
+	}
+	if tr.DialContext == nil {
+		t.Error("DialContext is nil, want the configured dialer")
+	}
+}
+
+// Keep-alive is off whenever a dialer is set: two sequential fetches with the
+// same client to the same server dial twice, on the DefaultTransport clone and
+// on the proxy / TLS transport.
+func TestWebFetchDialerDisablesKeepAlive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	for _, insecure := range []bool{false, true} {
+		d := &dialRecorder{}
+		c := newFetchClient(WebFetchConfig{DialContext: d.dial, InsecureTLS: insecure})
+		for i := 0; i < 2; i++ {
+			resp, err := c.Get(srv.URL)
+			if err != nil {
+				t.Fatalf("insecure=%v fetch %d: %v", insecure, i+1, err)
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		if got, want := d.snapshot(), map[string]int{srvAddr(srv): 2}; !sameCounts(got, want) {
+			t.Fatalf("insecure=%v: dials = %v, want %v (one per fetch, no reuse)", insecure, got, want)
+		}
 	}
 }

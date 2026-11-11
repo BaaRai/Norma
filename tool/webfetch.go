@@ -42,9 +42,17 @@ type WebFetchConfig struct {
 	// connection either path opens goes through it. With Proxy set, the primary
 	// client dials the proxy address; the direct retry dials the origin. A dial
 	// error fails the fetch with that error. nil keeps net/http's default dialer.
+	// With DialContext set and no Proxy, CACert or InsecureTLS, the transport is a
+	// clone of http.DefaultTransport (environment proxy, timeouts and HTTP/2 kept)
+	// with only the dialer replaced. On every transport that carries DialContext,
+	// keep-alive is disabled: each request opens a new connection through the
+	// dialer, so a connection dialled for an earlier request is never reused.
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 	// DisableDirectRetry, when true, turns off the direct (no-proxy) retry made
 	// after a proxy-caused failure: a fetch that fails through Proxy fails.
+	// When the retry is on, the direct client is built like the primary one
+	// without Proxy or CACert: with DialContext set (and no InsecureTLS) it uses
+	// the http.DefaultTransport clone, keep-alive disabled.
 	DisableDirectRetry bool
 }
 
@@ -84,10 +92,27 @@ const maxFetchBytes = 2 << 20 // 2 MiB
 
 // newFetchClient returns an HTTP client honoring the proxy / TLS config.
 func newFetchClient(cfg WebFetchConfig) *http.Client {
-	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" && cfg.DialContext == nil {
-		return &http.Client{CheckRedirect: cfg.CheckRedirect}
+	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" {
+		if cfg.DialContext == nil {
+			return &http.Client{CheckRedirect: cfg.CheckRedirect}
+		}
+		// Dialer only: clone http.DefaultTransport so ProxyFromEnvironment, its
+		// timeouts (TLSHandshakeTimeout etc.) and HTTP/2 (ForceAttemptHTTP2) are
+		// kept, and replace only the dialer. Keep-alive is disabled so every
+		// request dials through DialContext; no earlier connection is reused.
+		tr, ok := http.DefaultTransport.(*http.Transport)
+		if ok {
+			tr = tr.Clone()
+		} else {
+			tr = &http.Transport{}
+		}
+		tr.DialContext = cfg.DialContext
+		tr.DisableKeepAlives = true
+		return &http.Client{Transport: tr, CheckRedirect: cfg.CheckRedirect}
 	}
-	tr := &http.Transport{DialContext: cfg.DialContext}
+	// Proxy / TLS option: dedicated transport. With a dialer set, keep-alive is
+	// disabled so every request dials through DialContext (no connection reuse).
+	tr := &http.Transport{DialContext: cfg.DialContext, DisableKeepAlives: cfg.DialContext != nil}
 	if cfg.Proxy != "" {
 		if pu, err := url.Parse(cfg.Proxy); err == nil {
 			tr.Proxy = http.ProxyURL(pu)
