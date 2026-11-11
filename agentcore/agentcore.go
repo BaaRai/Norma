@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -103,6 +105,16 @@ type Options struct {
 	// WebFetchInsecureTLS skips TLS verification for WebFetch (curl -k). Blunt
 	// fallback when no CA cert is available; prefer WebFetchCACert.
 	WebFetchInsecureTLS bool
+	// WebFetchCheckRedirect, when set, sees every redirect hop of WebFetch (on
+	// the proxied path and on the direct retry); returning an error stops the
+	// fetch. nil keeps net/http's default redirect policy.
+	WebFetchCheckRedirect func(req *http.Request, via []*http.Request) error
+	// WebFetchDialContext, when set, opens every WebFetch connection (proxied
+	// path and direct retry); a dial error fails the fetch. nil = default dialer.
+	WebFetchDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// WebFetchDisableDirectRetry turns off WebFetch's direct (no-proxy) retry
+	// after a proxy-caused failure. false keeps the retry.
+	WebFetchDisableDirectRetry bool
 	// EnableWebSearch adds the network-facing web_search tool (permission-gated).
 	EnableWebSearch bool
 	// WebSearchBackend selects the search backend: "ddgs" (DuckDuckGo, no key),
@@ -296,7 +308,7 @@ func NewSession(opts Options) *Session {
 		tools = append(tools, opts.Skills.Tool())
 	}
 	if opts.EnableWebFetch {
-		tools = append(tools, tool.NewWebFetch(tool.WebFetchConfig{Proxy: opts.WebFetchProxy, CACert: opts.WebFetchCACert, InsecureTLS: opts.WebFetchInsecureTLS}))
+		tools = append(tools, tool.NewWebFetch(tool.WebFetchConfig{Proxy: opts.WebFetchProxy, CACert: opts.WebFetchCACert, InsecureTLS: opts.WebFetchInsecureTLS, CheckRedirect: opts.WebFetchCheckRedirect, DialContext: opts.WebFetchDialContext, DisableDirectRetry: opts.WebFetchDisableDirectRetry}))
 	}
 	if opts.EnableWebSearch {
 		// A misconfigured backend (unknown name, or brave-free without a key)
