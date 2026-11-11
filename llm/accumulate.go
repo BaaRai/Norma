@@ -45,7 +45,17 @@ func (a *Accumulator) Add(ev StreamEvent) {
 		}
 		a.thinkBuf.WriteString(ev.Text)
 	case SEThinkingSignature:
+		// With thinking display omitted the block has a signature but no
+		// thinking deltas; open it so the signed block is not lost.
+		if a.thinkBuf == nil {
+			a.flushText()
+			a.thinkBuf = &strings.Builder{}
+		}
 		a.thinkSig = ev.Text
+	case SERedactedThinking:
+		a.flushText()
+		a.flushThinking()
+		a.blocks = append(a.blocks, ContentBlock{Type: BlockRedactedThinking, Data: ev.Text})
 	case SEToolUseStart:
 		a.flushText()
 		a.flushThinking()
@@ -91,7 +101,7 @@ func (a *Accumulator) flushText() {
 
 func (a *Accumulator) flushThinking() {
 	if a.thinkBuf != nil {
-		if s := a.thinkBuf.String(); s != "" {
+		if s := a.thinkBuf.String(); s != "" || a.thinkSig != "" {
 			a.blocks = append(a.blocks, ContentBlock{
 				Type:      BlockThinking,
 				Thinking:  s,

@@ -187,6 +187,7 @@ func parseAnthropicResponse(raw []byte) (Message, string, Usage, error) {
 			Text      string          `json:"text"`
 			Thinking  string          `json:"thinking"`
 			Signature string          `json:"signature"`
+			Data      string          `json:"data"`
 			ID        string          `json:"id"`
 			Name      string          `json:"name"`
 			Input     json.RawMessage `json:"input"`
@@ -221,6 +222,8 @@ func parseAnthropicResponse(raw []byte) (Message, string, Usage, error) {
 			}
 		case "thinking":
 			blocks = append(blocks, ContentBlock{Type: BlockThinking, Thinking: b.Thinking, Signature: b.Signature})
+		case "redacted_thinking":
+			blocks = append(blocks, ContentBlock{Type: BlockRedactedThinking, Data: b.Data})
 		case "tool_use":
 			in := b.Input
 			if len(in) == 0 {
@@ -239,6 +242,7 @@ func parseAnthropicFrame(data string) (StreamEvent, bool, error) {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 			Name string `json:"name"`
+			Data string `json:"data"`
 		} `json:"content_block"`
 		Delta struct {
 			Type        string `json:"type"`
@@ -280,6 +284,9 @@ func parseAnthropicFrame(data string) (StreamEvent, bool, error) {
 	case "content_block_start":
 		if f.ContentBlock.Type == "tool_use" {
 			return StreamEvent{Type: SEToolUseStart, ToolID: f.ContentBlock.ID, ToolName: f.ContentBlock.Name}, true, nil
+		}
+		if f.ContentBlock.Type == "redacted_thinking" {
+			return StreamEvent{Type: SERedactedThinking, Text: f.ContentBlock.Data}, true, nil
 		}
 	case "content_block_delta":
 		switch f.Delta.Type {
@@ -360,7 +367,7 @@ func filterThinkingBlocks(msgs []Message, thinkingEnabled bool) []Message {
 		if !thinkingEnabled {
 			filtered := make([]ContentBlock, 0, len(content))
 			for _, b := range content {
-				if b.Type != BlockThinking {
+				if b.Type != BlockThinking && b.Type != BlockRedactedThinking {
 					filtered = append(filtered, b)
 				}
 			}
