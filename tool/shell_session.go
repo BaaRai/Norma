@@ -375,7 +375,7 @@ func (m *Manager) dispatchWaiter(s *ptySession, quiet, grace, timeout time.Durat
 	if !s.running() {
 		status = TaskCompleted
 	}
-	m.enqueueSessNote(s, KindBash, status, fmt.Sprintf("Interactive session %s (%s) completed (%s). Continue with shell_read(session_id=%q), or end it with shell_close.\n%s",
+	m.enqueueSessNote(s, KindBash, status, fmt.Sprintf("Interactive session %s (%s): %s. Continue with shell_read(session_id=%q), or end it with shell_close.\n%s",
 		s.id, short(s.command), by, s.id, tail))
 }
 
