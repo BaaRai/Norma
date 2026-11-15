@@ -302,7 +302,7 @@ func (m *Manager) session(id string) (*ptySession, bool) {
 // openSession starts an interactive program in a fresh PTY and begins its read loop.
 func (m *Manager) openSession(command, workDir string, env []string, rows, cols int, mode string, prompt *regexp.Regexp) (*ptySession, error) {
 	if !ptySupported() {
-		return nil, fmt.Errorf("交互式 shell(PTY) 在当前平台不支持")
+		return nil, fmt.Errorf("interactive shell (PTY) is not supported on this platform")
 	}
 	m.reapSessions()
 	if rows <= 0 {
@@ -375,7 +375,7 @@ func (m *Manager) dispatchWaiter(s *ptySession, quiet, grace, timeout time.Durat
 	if !s.running() {
 		status = TaskCompleted
 	}
-	m.enqueueSessNote(s, KindBash, status, fmt.Sprintf("交互会话 %s（%s）%s。用 shell_read(session_id=%q) 继续，或 shell_close 结束。\n%s",
+	m.enqueueSessNote(s, KindBash, status, fmt.Sprintf("Interactive session %s (%s): %s. Continue with shell_read(session_id=%q), or end it with shell_close.\n%s",
 		s.id, short(s.command), by, s.id, tail))
 }
 
@@ -403,7 +403,7 @@ func (m *Manager) monitorWaiter(s *ptySession, pats []*regexp.Regexp) {
 			}
 			tail, _, _ := s.readSince(from, 0, 4096, true)
 			m.enqueueSessNote(s, KindMonitor, TaskCompleted,
-				fmt.Sprintf("监听会话 %s（%s）已结束(exit %s)。\n%s", s.id, short(s.command), fmtExit(s.exit()), tail))
+				fmt.Sprintf("Monitored session %s (%s) has ended (exit %s).\n%s", s.id, short(s.command), fmtExit(s.exit()), tail))
 			return
 		case <-s.notifyCh:
 			tail := s.tailStr(8192)
@@ -411,7 +411,7 @@ func (m *Manager) monitorWaiter(s *ptySession, pats []*regexp.Regexp) {
 				if !fired[i] && p.MatchString(tail) {
 					fired[i] = true
 					m.enqueueSessNote(s, KindMonitor, TaskRunning,
-						fmt.Sprintf("监听会话 %s 命中 /%s/：\n%s", s.id, p.String(), tail))
+						fmt.Sprintf("Monitored session %s matched /%s/:\n%s", s.id, p.String(), tail))
 				}
 			}
 		}
