@@ -212,11 +212,26 @@ func (s *Session) View(msgs []llm.Message) []llm.Message {
 		})
 		s.nudgedLastTurn = true
 	}
+	opts := ReassembleOptions{State: &s.state, Tag: true}
+	out := Reassemble(view, msgs, sc, opts)
+	// noa sized the projection, which leaves out the ref tags and the nudge.
+	// Check the request actually sent and, past 70% of the window, trim
+	// outgoing tool-result copies: this also bounds a model that ignores
+	// Compress. Originals, call arguments and tool pairing are untouched.
+	if limit := cfg.ModelContextLimit; limit > 0 && estimateMessages(out) > limit*7/10 {
+		var trimmed int
+		view, trimmed = boundToolCopies(view, limit*7/10, func(v []noa.CoreMessage) int {
+			return estimateMessages(Reassemble(v, msgs, sc, opts))
+		})
+		if trimmed > 0 {
+			s.lastTruncatedCount += trimmed
+			out = Reassemble(view, msgs, sc, opts)
+		}
+	}
 	// lastView is what the model's refs will be resolved against, so it must be
-	// the array the model actually sees — nudge included.
+	// the array the model actually sees — nudge and trimmed copies included.
 	s.lastView = view
 
-	out := Reassemble(view, msgs, sc, ReassembleOptions{State: &s.state, Tag: true})
 	s.lastSentTokens = estimateMessages(out)
 	return out
 }

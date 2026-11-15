@@ -368,8 +368,9 @@ func TestMostlyCompetentModelStaysBounded(t *testing.T) {
 // That is deliberate (both reclaim nothing, and both loop just as expensively),
 // but the consequence is worth pinning: an EAGER model gets no more chances than
 // a silent one, so a model whose only problem is picking bad refs never gets the
-// repeated guidance that would let it correct course, and the context runs past
-// the window exactly as if it had never tried.
+// repeated guidance that would let it correct course. Its context no longer runs
+// past the window, though: the outgoing tool-result budget in Session.View holds
+// the request under 70% of the window whether or not the model compresses.
 //
 // If this test starts failing because the eager model gets materially more
 // nudges, the ladder's policy has changed and the reasoning above needs revising
@@ -417,10 +418,9 @@ func TestFailedAttemptsAreSilencedLikeIgnoredOnes(t *testing.T) {
 		t.Fatalf("the eager model got %d nudges against the silent model's %d; the ladder "+
 			"now distinguishes them and this test's premise is stale", eagerNudges, silentNudges)
 	}
-	if eagerFinal <= window {
-		t.Fatalf("the eager-but-wrong model ended at %d, inside the %d window; "+
-			"something now rescues it and the documented limitation no longer holds",
-			eagerFinal, window)
+	if eagerFinal > window*7/10 {
+		t.Fatalf("the eager-but-wrong model ended at %d, past 70%% of the %d window; the "+
+			"outgoing tool-result budget did not hold", eagerFinal, window)
 	}
 	t.Logf("eager-but-wrong: %d nudges, ended at %d tokens; never tried: %d nudges, ended at %d "+
 		"(window %d) — trying and failing buys nothing over staying silent",
